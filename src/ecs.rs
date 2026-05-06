@@ -32,6 +32,7 @@ use crate::manager::{
 use crate::overlay::{FlashMessageManager, OverlayManager};
 use crate::platform::{Modifiers, PlatformCallbacks, WinID, WorkspaceId};
 
+mod animation;
 mod focus;
 pub mod layout;
 mod mouse;
@@ -252,6 +253,24 @@ pub struct RepositionMarker(pub Origin);
 /// Component representing a request to resize a window.
 #[derive(Component, Debug, Deref, DerefMut)]
 pub struct ResizeMarker(pub Size);
+
+/// State for an in-flight move animation (`RepositionMarker` is the request target).
+#[derive(Component, Debug)]
+pub struct PositionAnimation {
+    pub from: Origin,
+    pub to: Origin,
+    pub elapsed: f64,
+    pub duration: f64,
+}
+
+/// State for an in-flight resize animation (`ResizeMarker` is the request target).
+#[derive(Component, Debug)]
+pub struct ResizeAnimation {
+    pub from: Size,
+    pub to: Size,
+    pub elapsed: f64,
+    pub duration: f64,
+}
 
 /// Marker component indicating that a window is currently being dragged by the mouse.
 #[derive(Component)]

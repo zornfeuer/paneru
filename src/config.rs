@@ -15,21 +15,24 @@ use std::{
 use stdext::function_name;
 use tracing::{error, info, warn};
 
-use self::decorations::BorderRadiusOption;
-use self::swipe::SwipeGestureDirection;
 use crate::{
     commands::{Command, Direction, MouseMove, MoveFocus, Operation, ResizeDirection},
-    platform::{Modifiers, OSStatus, macos_major_version},
-};
-use crate::{
     errors::{Error, Result},
-    util::MacResult,
+    platform::{CFStringRef, Modifiers, OSStatus, macos_major_version},
+    util::{AXUIWrapper, MacResult},
 };
-use crate::{platform::CFStringRef, util::AXUIWrapper};
 
+pub mod animation;
 pub mod decorations;
 pub mod padding;
 pub mod swipe;
+
+use self::animation::{AnimationCurve, AnimationOptions};
+use self::decorations::BorderRadiusOption;
+use self::swipe::SwipeGestureDirection;
+
+#[cfg(test)]
+static INNER_CONFIG_PARSE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A `LazyLock` that determines the path to the application's configuration file.
 /// It checks the `PANERU_CONFIG` environment variable first, then standard XDG locations and user home directory.
@@ -306,9 +309,8 @@ impl Config {
         self.inner().options.clone()
     }
 
-    // Returns the animation speed in 1/10th of screen size per second.
-    // E.g. a value of 20 means: move at a speed of two screen sizes per second.
-    // If a screen is 1920px, the calculated speed would be 3840 pixels/second.
+    /// **Legacy:** speed in “1/10th of screen width per second” units. Used only to approximate
+    /// [`Self::animation_duration_secs`] when the `[animation]` table is absent. Prefer `[animation]`.
     pub fn animation_speed(&self) -> f64 {
         self.options()
             .animation_speed
@@ -317,6 +319,30 @@ impl Config {
             .unwrap_or(1_000_000.0)
             .max(5.0)
             / 10.0
+    }
+
+    /// Duration of window move/resize animations in seconds (from `[animation].duration_ms`
+    /// or defaults). Use `0.0` for instant updates.
+    pub fn animation_duration_secs(&self) -> f64 {
+        let inner = self.inner();
+        if let Some(ref anim) = inner.animation {
+            anim.duration_ms.map_or(0.16, |ms| {
+                std::time::Duration::from_millis(ms).as_secs_f64()
+            })
+        } else if inner.options.animation_speed.is_some() {
+            let speed = self.animation_speed();
+            (0.4_f64 / speed).clamp(0.000_1, 2.0)
+        } else {
+            0.16
+        }
+    }
+
+    pub fn animation_curve(&self) -> AnimationCurve {
+        self.inner()
+            .animation
+            .as_ref()
+            .and_then(|a| a.curve)
+            .unwrap_or(AnimationCurve::EaseOutCubic)
     }
 
     /// Finds a keybinding matching the given `keycode` and `modifier` mask.
@@ -736,6 +762,7 @@ struct InnerConfig {
     decorations: Option<decorations::DecorationsOptions>,
     swipe: Option<swipe::SwipeOptions>,
     padding: Option<padding::PaddingOptions>,
+    animation: Option<AnimationOptions>,
 }
 
 impl InnerConfig {
@@ -749,6 +776,10 @@ impl InnerConfig {
     ///
     /// `Ok(InnerConfig)` if the configuration is parsed successfully, otherwise `Err(Error)` with an error message.
     fn new(input: &str) -> Result<InnerConfig> {
+        #[cfg(test)]
+        let _guard = INNER_CONFIG_PARSE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         InnerConfig::parse_config(input)
     }
 
@@ -1523,6 +1554,40 @@ modifier = "alt"
 }
 
 #[test]
+fn test_animation_section_parsing() {
+    let config: Config = r#"
+[options]
+
+[bindings]
+quit = "ctrl+alt-q"
+
+[animation]
+duration_ms = 200
+curve = "linear"
+"#
+    .try_into()
+    .unwrap();
+    assert!((config.animation_duration_secs() - 0.2).abs() < 1e-9);
+    assert_eq!(config.animation_curve(), AnimationCurve::Linear);
+}
+
+#[test]
+fn test_animation_duration_zero_from_toml() {
+    let config: Config = r#"
+[options]
+
+[bindings]
+quit = "ctrl+alt-q"
+
+[animation]
+duration_ms = 0
+"#
+    .try_into()
+    .unwrap();
+    assert!((config.animation_duration_secs()).abs() < f64::EPSILON);
+}
+
+#[test]
 fn test_parse_resize_commands() {
     assert!(matches!(
         parse_command(&["window", "resize"]).unwrap(),
@@ -1645,4 +1710,6 @@ fn test_config_defaults() {
     assert_eq!(config.border_width(), 2.0);
     assert_eq!(config.border_radius(), BorderRadiusOption::Auto);
     assert_eq!(config.menubar_height(), None);
+    assert!((config.animation_duration_secs() - 0.16).abs() < f64::EPSILON);
+    assert_eq!(config.animation_curve(), AnimationCurve::EaseOutCubic);
 }

@@ -3,9 +3,7 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::hierarchy::{ChildOf, Children};
 use bevy::ecs::message::{MessageReader, MessageWriter};
 use bevy::ecs::query::{Changed, Has, Or, With};
-use bevy::ecs::system::{
-    Commands, Local, NonSend, NonSendMut, ParallelCommands, Populated, Query, Res, Single,
-};
+use bevy::ecs::system::{Commands, Local, NonSend, NonSendMut, Populated, Query, Res, Single};
 use bevy::math::IRect;
 use bevy::tasks::AsyncComputeTaskPool;
 use bevy::tasks::futures_lite::future;
@@ -20,11 +18,12 @@ use tracing::{Level, debug, error, info, instrument, trace, warn};
 
 use super::{
     ActiveDisplayMarker, BProcess, ExistingMarker, FocusedMarker, FreshMarker,
-    PollForNotifications, RepositionMarker, ResizeMarker, RetryFrontSwitch, SpawnWindowTrigger,
-    Timeout, WMEventTrigger,
+    PollForNotifications, PositionAnimation, RepositionMarker, ResizeAnimation, ResizeMarker,
+    RetryFrontSwitch, SpawnWindowTrigger, Timeout, WMEventTrigger,
 };
 
 use crate::config::{Config, decorations::BorderRadiusOption};
+use crate::ecs::animation::{lerp_origin, lerp_size};
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{ActiveDisplay, Configuration, Windows};
 use crate::ecs::{
@@ -549,107 +548,180 @@ pub(super) fn display_changes_watcher(
     });
 }
 
-/// Animates window movement.
-/// This is a Bevy system that runs on `Update`. It smoothly moves windows to their target
-/// positions, as indicated by the `RepositionMarker` component.
-/// Animation speed is controlled by the `animation_speed` in the `Config`.
-/// When a window reaches its target position, the `RepositionMarker` is removed.
-///
-/// # Arguments
-///
-/// * `windows` - A `Populated` query for `(&mut Window, Entity, &RepositionMarker)` components.
-/// * `displays` - A query for all `Display` entities, used to get display bounds and menubar height.
-/// * `time` - The Bevy `Time` resource for calculating delta time.
-/// * `config` - The `Config` resource, used for animation speed.
-/// * `commands` - Bevy commands to remove the `RepositionMarker` when animation is complete.
+/// Animates window movement toward `RepositionMarker` using duration and an easing curve
+/// from `[animation]` (`animation_duration_secs`, `animation_curve`).
 #[allow(clippy::needless_pass_by_value)]
 #[instrument(level = Level::TRACE, skip_all)]
 pub(super) fn animate_entities(
-    mut animate: Populated<(&mut Position, Entity, &RepositionMarker)>,
-    active_display: ActiveDisplay,
+    mut animate: Populated<(
+        &mut Position,
+        Entity,
+        &RepositionMarker,
+        Option<&mut PositionAnimation>,
+    )>,
     time: Res<Time>,
     config: Res<Config>,
-    commands: ParallelCommands,
+    mut commands: Commands,
 ) {
-    let move_ratio = config.animation_speed() * time.delta_secs_f64();
-    let move_delta = move_ratio * f64::from(active_display.display().width());
+    let dt = time.delta_secs_f64();
+    let duration_cfg = config.animation_duration_secs();
+    let curve = config.animation_curve();
 
-    animate
-        .par_iter_mut()
-        .for_each(|(mut position, entity, RepositionMarker(origin))| {
-            let delta = position
-                .0
-                .as_vec2()
-                .move_towards(origin.as_vec2(), move_delta as f32)
-                .as_ivec2();
+    for (mut position, entity, RepositionMarker(target), anim) in &mut animate {
+        let to = *target;
 
-            trace!(
-                "entity {entity} source {} dest {origin} delta {move_delta} moving to {delta}",
-                position.0,
-            );
-            position.0 = delta;
-            if *origin == delta {
-                commands.command_scope(|mut command| {
-                    command.entity(entity).try_remove::<RepositionMarker>();
+        if duration_cfg <= f64::EPSILON {
+            position.0 = to;
+            commands
+                .entity(entity)
+                .remove::<RepositionMarker>()
+                .remove::<PositionAnimation>();
+            continue;
+        }
+
+        match anim {
+            None => {
+                let from = position.0;
+                let elapsed = dt;
+                if elapsed >= duration_cfg {
+                    position.0 = to;
+                    commands
+                        .entity(entity)
+                        .remove::<RepositionMarker>()
+                        .remove::<PositionAnimation>();
+                    continue;
+                }
+                let progress = curve.sample((elapsed / duration_cfg).min(1.0));
+                position.0 = lerp_origin(from, to, progress);
+                commands.entity(entity).insert(PositionAnimation {
+                    from,
+                    to,
+                    elapsed,
+                    duration: duration_cfg,
                 });
             }
-        });
-}
-
-/// Animates window resizing.
-/// This is a Bevy system that runs on `Update`. It resizes windows to their target
-/// dimensions, as indicated by the `ResizeMarker` component.
-/// When a window reaches its target size, the `ResizeMarker` is removed.
-///
-/// # Arguments
-///
-/// * `windows` - A `Populated` query for `(&mut Window, Entity, &ResizeMarker)` components.
-/// * `active_display` - An `ActiveDisplay` system parameter providing immutable access to the active display.
-/// * `commands` - Bevy commands to remove the `ResizeMarker` when resizing is complete.
-#[allow(clippy::needless_pass_by_value)]
-#[instrument(level = Level::TRACE, skip_all)]
-pub(super) fn animate_resize_entities(
-    mut animate: Populated<(&mut Bounds, Entity, &ResizeMarker, Has<RepositionMarker>)>,
-    active_display: ActiveDisplay,
-    time: Res<Time>,
-    config: Res<Config>,
-    commands: ParallelCommands,
-) {
-    let move_ratio = config.animation_speed() * time.delta_secs_f64();
-    let move_delta = move_ratio * f64::from(active_display.display().width());
-
-    animate
-        .par_iter_mut()
-        .for_each(|(mut bounds, entity, ResizeMarker(size), moving)| {
-            if moving {
-                // Defer resize while the window is being repositioned so it doesn't extend past
-                // the screen edge before the move lands.
-                // Exception: when the resize *shrinks* the window (e.g. stacking), there is no
-                // risk of overshooting the screen, and deferring would leave the window at its old
-                // (full) height until the reposition finishes.
-                let current_size = bounds.0;
-                if size.x > current_size.x || size.y > current_size.y {
-                    return;
+            Some(mut a) if a.to != to => {
+                a.from = position.0;
+                a.to = to;
+                a.elapsed = dt;
+                a.duration = duration_cfg;
+                let progress = curve.sample((a.elapsed / a.duration).min(1.0));
+                position.0 = lerp_origin(a.from, a.to, progress);
+                if a.elapsed >= a.duration {
+                    position.0 = to;
+                    commands
+                        .entity(entity)
+                        .remove::<RepositionMarker>()
+                        .remove::<PositionAnimation>();
                 }
             }
+            Some(mut a) => {
+                a.elapsed += dt;
+                let progress = curve.sample((a.elapsed / a.duration).min(1.0));
+                position.0 = lerp_origin(a.from, a.to, progress);
+                if a.elapsed >= a.duration {
+                    position.0 = to;
+                    commands
+                        .entity(entity)
+                        .remove::<RepositionMarker>()
+                        .remove::<PositionAnimation>();
+                }
+            }
+        }
+    }
+}
 
-            let delta = bounds
-                .0
-                .as_vec2()
-                .move_towards(size.as_vec2(), move_delta as f32)
-                .as_ivec2();
+/// Animates window resizing toward `ResizeMarker`. Growing resizes are deferred while
+/// `RepositionMarker` is present so the window does not extend past the screen edge
+/// before the move finishes.
+#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::type_complexity)]
+#[instrument(level = Level::TRACE, skip_all)]
+pub(super) fn animate_resize_entities(
+    mut animate: Populated<(
+        &mut Bounds,
+        Entity,
+        &ResizeMarker,
+        Has<RepositionMarker>,
+        Option<&mut ResizeAnimation>,
+    )>,
+    time: Res<Time>,
+    config: Res<Config>,
+    mut commands: Commands,
+) {
+    let dt = time.delta_secs_f64();
+    let duration_cfg = config.animation_duration_secs();
+    let curve = config.animation_curve();
 
-            trace!(
-                "entity {entity} source {} dest {size} delta {move_delta} resizing to {delta}",
-                bounds.0,
-            );
-            bounds.0 = delta;
-            if *size == delta {
-                commands.command_scope(|mut command| {
-                    command.entity(entity).try_remove::<ResizeMarker>();
+    for (mut bounds, entity, ResizeMarker(target), moving, anim) in &mut animate {
+        if moving {
+            let current_size = bounds.0;
+            if target.x > current_size.x || target.y > current_size.y {
+                continue;
+            }
+        }
+
+        let to = *target;
+
+        if duration_cfg <= f64::EPSILON {
+            bounds.0 = to;
+            commands
+                .entity(entity)
+                .remove::<ResizeMarker>()
+                .remove::<ResizeAnimation>();
+            continue;
+        }
+
+        match anim {
+            None => {
+                let from = bounds.0;
+                let elapsed = dt;
+                if elapsed >= duration_cfg {
+                    bounds.0 = to;
+                    commands
+                        .entity(entity)
+                        .remove::<ResizeMarker>()
+                        .remove::<ResizeAnimation>();
+                    continue;
+                }
+                let progress = curve.sample((elapsed / duration_cfg).min(1.0));
+                bounds.0 = lerp_size(from, to, progress);
+                commands.entity(entity).insert(ResizeAnimation {
+                    from,
+                    to,
+                    elapsed,
+                    duration: duration_cfg,
                 });
             }
-        });
+            Some(mut a) if a.to != to => {
+                a.from = bounds.0;
+                a.to = to;
+                a.elapsed = dt;
+                a.duration = duration_cfg;
+                let progress = curve.sample((a.elapsed / a.duration).min(1.0));
+                bounds.0 = lerp_size(a.from, a.to, progress);
+                if a.elapsed >= a.duration {
+                    bounds.0 = to;
+                    commands
+                        .entity(entity)
+                        .remove::<ResizeMarker>()
+                        .remove::<ResizeAnimation>();
+                }
+            }
+            Some(mut a) => {
+                a.elapsed += dt;
+                let progress = curve.sample((a.elapsed / a.duration).min(1.0));
+                bounds.0 = lerp_size(a.from, a.to, progress);
+                if a.elapsed >= a.duration {
+                    bounds.0 = to;
+                    commands
+                        .entity(entity)
+                        .remove::<ResizeMarker>()
+                        .remove::<ResizeAnimation>();
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::needless_pass_by_value)]

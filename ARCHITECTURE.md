@@ -61,6 +61,7 @@ Bevy is typically used for games, so Paneru implements a custom bridge to intera
 - **`NativeFullscreenMarker`**: Marks a window that is in macOS native fullscreen mode.
 - **`Unmanaged`:** An enum identifying windows that are `Floating`, `Minimized`, or `Hidden`.
 - **`RepositionMarker` / `ResizeMarker`**: Used to signal that a window needs to be moved or resized.
+- **`PositionAnimation` / `ResizeAnimation`**: In-flight interpolation state (from/to, elapsed, duration) while servicing those markers; removed when the target is reached.
 
 ### Resources
 - **`WindowManager`:** A wrapper for the global window management state and OS bridge.

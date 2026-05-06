@@ -22,7 +22,7 @@ General behavior settings for the window manager.
 | `horizontal_mouse_warp` | Integer ``(-1, 1)`` | Off | If enabled, the mouse will warp to another screen above or below, when touching the left or right edge. The direction depends on the direction - a negative value will cause the left edge to warp to a screen above and the right edge to a screen below. This allows having horizontal positioning of displays while having them aligned in a virtual layout in macOS settings. The cursor lands at the *opposite* edge of the target display (preserving cursor flow), with the source's relative Y position. Carries pre-warp horizontal velocity to avoid a "standing start", and skips the warp when the equivalent Y has no position on the target — matching macOS's native side-by-side behavior for displays of unequal height. (inspired by https://github.com/mogenson/WarpMouse.spoon) |
 | `horizontal_mouse_warp_offset` | Integer (px) | `0` | Vertical pixel offset applied to the `horizontal_mouse_warp` landing position, signed by warp direction. Positive values shift the cursor lower when warping to a display *below* (in macOS arrangement) and higher when warping to one *above*. Use to compensate for physical desk arrangement differing from the macOS arrangement (e.g. portrait monitor sitting physically higher or lower than the laptop). |
 | `preset_column_widths` | Array (Float) | `[0.25, 0.33, 0.5, 0.66, 0.75]` | Ratios of the screen width used by the `window_resize` command to cycle sizes. |
-| `animation_speed` | Float | `50` | Speed of window animations (1/10th of screen size per second). Set to a very high value to effectively disable animations. |
+| `animation_speed` | Float | `50` | **Legacy.** Prefer `[animation]` below. When `[animation]` is omitted, this value still influences approximate animation duration for backward compatibility. |
 | `auto_center` | Boolean | `false` | Automatically center the focused window on the screen when switching focus. |
 | `sliver_height` | Float (0.1–1.0) | `1.0` | Vertical ratio of off-screen windows kept visible to prevent macOS from relocating them. |
 | `sliver_width` | Integer (px) | `5` | Horizontal width of off-screen windows kept visible. |
@@ -32,7 +32,28 @@ General behavior settings for the window manager.
 
 ---
 
-## 2. Padding (`[padding]`)
+## 2. Window animation (`[animation]`)
+
+Duration- and curve-based interpolation for window move (`RepositionMarker`) and resize (`ResizeMarker`). **This is the preferred way** to tune motion; `[options].animation_speed` remains only as a legacy fallback when `[animation]` is not present.
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `duration_ms` | Integer (ms) | `160` | Length of move/resize animations. Set to `0` to apply targets instantly (no tween). |
+| `curve` | String | `ease-out-cubic` | Easing: `linear`, `ease-out-cubic`, `ease-in-out-cubic`, `ease-out-quart` (kebab-case in TOML). |
+
+**Example:**
+
+```toml
+[animation]
+duration_ms = 160
+curve = "ease-out-cubic"
+```
+
+If the `[animation]` table is omitted entirely, duration defaults to **160 ms** and the curve defaults to **ease-out-cubic**. If `[animation]` is present but `duration_ms` is omitted, it also defaults to 160 ms.
+
+---
+
+## 3. Padding (`[padding]`)
 
 Sets the margins at the edges of the screen.
 
@@ -45,7 +66,7 @@ Sets the margins at the edges of the screen.
 
 ---
 
-## 3. Swipe & Gestures (`[swipe]`)
+## 4. Swipe & Gestures (`[swipe]`)
 
 Configure trackpad gestures and scroll-wheel window sliding.
 
@@ -70,7 +91,7 @@ Configure trackpad gestures and scroll-wheel window sliding.
 
 ---
 
-## 4. Decorations (`[decorations]`)
+## 5. Decorations (`[decorations]`)
 
 Visual styling for active and inactive windows.
 
@@ -92,7 +113,7 @@ opacity_night = -0.25
 
 ---
 
-## 5. Keybindings (`[bindings]`)
+## 6. Keybindings (`[bindings]`)
 
 Bindings map a key combination to an action. A binding can be a single string or an array of strings.
 Format: `"[modifiers-]key"`. Available modifiers are:
@@ -171,7 +192,7 @@ $ paneru send-cmd window virtualmove south
 
 ---
 
-## 6. Window Rules (`[windows]`)
+## 7. Window Rules (`[windows]`)
 
 Define specific behaviors for applications based on their Title or Bundle ID.
 
@@ -199,7 +220,7 @@ bindings_passthrough = ["ctrl-h", "ctrl-l"]
 
 ---
 
-## 7. Experimental Features
+## 8. Experimental Features
 
 > [!WARNING]
 > These features rely on undocumented macOS window-server APIs and have known issues. For example, overlay windows (like YouTube Picture-in-Picture) may be partially shaded, and layer ordering can behave unexpectedly. Both features are **disabled by default**. 
@@ -243,4 +264,4 @@ width = 2.0
 radius = 12.0
 ```
 
-> **Tip:** You can override the `border_radius` for specific applications in the `[windows]` section. See [Window Rules](#6-window-rules).
+> **Tip:** You can override the `border_radius` for specific applications in the `[windows]` section. See [Window Rules](#7-window-rules).
