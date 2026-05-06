@@ -214,7 +214,7 @@ fn test_scrolling_stop() {
             use crate::ecs::Scrolling;
             let mut query = world.query::<&Scrolling>();
             let scroll = query.single(world).unwrap();
-            assert_eq!(scroll.velocity, 0.0);
+            assert!(scroll.velocity.abs() < f64::EPSILON);
             assert!(scroll.is_user_swiping);
         })
         .run(commands);

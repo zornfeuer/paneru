@@ -8,9 +8,11 @@ use objc2_core_foundation::{
     CFArray, CFDictionary, CFMutableData, CFNumber, CFNumberType, CFRetained, CFString, CFType,
     CGPoint, CGRect, CGSize, kCFBooleanTrue,
 };
+#[allow(deprecated)]
+use objc2_core_graphics::CGSetLocalEventsSuppressionInterval;
 use objc2_core_graphics::{
     CGAssociateMouseAndMouseCursorPosition, CGDirectDisplayID, CGDisplayBounds,
-    CGGetActiveDisplayList, CGSetLocalEventsSuppressionInterval, CGWarpMouseCursorPosition,
+    CGGetActiveDisplayList, CGWarpMouseCursorPosition,
 };
 use std::path::Path;
 use std::ptr::null_mut;
@@ -385,6 +387,7 @@ impl WindowManagerApi for WindowManagerOS {
 
     /// Centers the mouse cursor on the window if it's not already within the window's bounds.
     #[instrument(level = Level::DEBUG, skip_all, fields(window))]
+    #[allow(deprecated)]
     fn warp_mouse(&self, origin: Origin) {
         // Drop the local-event suppression interval to zero so HID mouse
         // events resume immediately after the warp. The default 250ms
