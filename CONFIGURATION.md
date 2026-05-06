@@ -59,13 +59,14 @@ Configure trackpad gestures and scroll-wheel window sliding.
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `fingers_count` | Integer | *None* | Number of fingers for the swipe gesture. Set to 3 or more to enable. |
-| `direction` | String | `"Natural"` | Direction of movement: `"Natural"` or `"Reversed"`. |
+| `direction` | String | `"Natural"` | Direction for **touchpad** horizontal swipes only (`"Natural"` or `"Reversed"`). Scroll wheel uses `[swipe.scroll] direction`. |
 
 ### `[swipe.scroll]`
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `modifier` | String | `"alt"` | Modifier key(s) required to slide windows with the scroll wheel: `"alt"`, `"rcmd"`, `"ralt + cmd"`, `"lctrl + lalt + cmd"`, etc. |
 | `vertical_modifier` | String | *None* | Additional modifier key that, when held together with `modifier`, switches virtual workspaces vertically instead of scrolling horizontally. For example, if `modifier = "alt"` and `vertical_modifier = "shift"`, then `alt + scroll` slides windows horizontally and `alt + shift + scroll` switches virtual workspace rows. |
+| `direction` | String | `"Natural"` | Direction for **scroll wheel** strip scrolling: `"Natural"` or `"Reversed"`. Independent of `[swipe.gesture] direction`. |
 
 ---
 

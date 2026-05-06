@@ -273,6 +273,17 @@ pub struct ReshuffleAroundMarker;
 #[derive(Component)]
 pub struct StackAdjustedResize;
 
+/// Origin of horizontal strip scrolling input — used to pick the correct
+/// `swipe_gesture` vs `swipe.scroll` direction setting in the integrator.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScrollSource {
+    /// Touchpad horizontal swipe (`Event::Swipe` / `Event::TouchpadDown`).
+    #[default]
+    Gesture,
+    /// Mouse wheel / scroll ticks (`Event::Scroll`).
+    Wheel,
+}
+
 #[derive(Component, Debug)]
 pub struct Scrolling {
     pub velocity: f64,
@@ -281,6 +292,7 @@ pub struct Scrolling {
     pub is_user_swiping: bool,
     /// Last time a physical swipe event was received.
     pub last_event: Instant,
+    pub source: ScrollSource,
 }
 
 impl Default for Scrolling {
@@ -290,6 +302,7 @@ impl Default for Scrolling {
             position: 0.0,
             is_user_swiping: false,
             last_event: Instant::now(),
+            source: ScrollSource::default(),
         }
     }
 }

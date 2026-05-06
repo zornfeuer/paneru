@@ -400,9 +400,8 @@ impl Config {
             .swipe
             .as_ref()
             .and_then(|swipe| swipe.gesture.as_ref())
-            .and_then(|gesture| gesture.direction.clone())
-            .clone()
-            .or(config.options.swipe_gesture_direction.clone())
+            .and_then(|gesture| gesture.direction)
+            .or(config.options.swipe_gesture_direction)
             .unwrap_or(SwipeGestureDirection::Natural)
     }
 
@@ -584,6 +583,16 @@ impl Config {
             .as_ref()
             .and_then(|swipe| swipe.scroll.as_ref())
             .and_then(|scroll| scroll.vertical_modifier)
+    }
+
+    pub fn swipe_scroll_direction(&self) -> SwipeGestureDirection {
+        let config = self.inner();
+        config
+            .swipe
+            .as_ref()
+            .and_then(|swipe| swipe.scroll.as_ref())
+            .and_then(|scroll| scroll.direction)
+            .unwrap_or(SwipeGestureDirection::Natural)
     }
 
     pub fn window_dim_ratio(&self, is_dark: bool) -> Option<f32> {
@@ -1487,6 +1496,30 @@ index = 1
     let defaults = Config::default();
     assert_eq!(defaults.swipe_sensitivity(), 0.35);
     assert_eq!(defaults.swipe_deceleration(), 4.0);
+    assert_eq!(
+        defaults.swipe_scroll_direction(),
+        SwipeGestureDirection::Natural
+    );
+}
+
+#[test]
+fn test_swipe_scroll_direction_from_toml() {
+    let config: Config = r#"
+[options]
+
+[bindings]
+quit = "ctrl+alt-q"
+
+[swipe.scroll]
+direction = "Reversed"
+modifier = "alt"
+"#
+    .try_into()
+    .unwrap();
+    assert_eq!(
+        config.swipe_scroll_direction(),
+        SwipeGestureDirection::Reversed
+    );
 }
 
 #[test]

@@ -12,7 +12,9 @@ use crate::config::Config;
 use crate::config::swipe::SwipeGestureDirection;
 use crate::ecs::layout::{Column, LayoutStrip};
 use crate::ecs::params::{ActiveDisplay, Configuration, Windows};
-use crate::ecs::{ActiveWorkspaceMarker, Position, Scrolling, SendMessageTrigger, WMEventTrigger};
+use crate::ecs::{
+    ActiveWorkspaceMarker, Position, ScrollSource, Scrolling, SendMessageTrigger, WMEventTrigger,
+};
 use crate::errors::Result;
 use crate::events::Event;
 use crate::manager::{Window, WindowManager};
@@ -35,13 +37,14 @@ pub(super) fn swipe_gesture(
     }
 
     for event in messages.read() {
-        let delta = match event {
+        let input = match event {
             Event::TouchpadDown => {
                 let (_, _, scrolling) = &mut *active_workspace;
                 if let Some(scrolling) = scrolling.as_mut() {
                     scrolling.velocity = 0.0;
                     scrolling.is_user_swiping = true;
                     scrolling.last_event = Instant::now();
+                    scrolling.source = ScrollSource::Gesture;
                 }
                 continue;
             }
@@ -56,18 +59,22 @@ pub(super) fn swipe_gesture(
                     + ((SCROLL_SCALE_UPPER - SCROLL_SCALE_LOWER) / SCROLL_FULL_RANGE)
                         * config.config().swipe_sensitivity();
 
-                *delta * scroll_scale
+                Some((*delta * scroll_scale, ScrollSource::Wheel))
             }
             Event::Swipe { deltas } => {
                 if config
                     .swipe_gesture_fingers()
                     .is_none_or(|fingers| deltas.len() != fingers)
                 {
-                    continue;
+                    None
+                } else {
+                    Some((deltas.iter().sum::<f64>(), ScrollSource::Gesture))
                 }
-                deltas.iter().sum::<f64>()
             }
-            _ => continue,
+            _ => None,
+        };
+        let Some((delta, source)) = input else {
+            continue;
         };
 
         let swipe_resolution = 1.0 / f64::from(active_display.bounds().width());
@@ -88,12 +95,14 @@ pub(super) fn swipe_gesture(
             scrolling.velocity = velocity;
             scrolling.is_user_swiping = true;
             scrolling.last_event = Instant::now();
+            scrolling.source = source;
         } else if let Ok(mut entity_commands) = commands.get_entity(*entity) {
             entity_commands.try_insert(Scrolling {
                 velocity: new_velocity,
                 position: f64::from(position.0.x),
                 is_user_swiping: true,
-                ..Default::default()
+                last_event: Instant::now(),
+                source,
             });
             // Do not keep re-inserting the marker for other messages.
             break;
@@ -216,13 +225,19 @@ pub(super) fn scrolling_integrator(
         .actual_display_bounds(active_display.dock(), config.config());
     let viewport_width = f64::from(viewport.width());
 
-    // Direction modifier: Natural moves strip left (negative offset) for positive delta (finger left)
-    let direction_modifier = match config.config().swipe_gesture_direction() {
-        SwipeGestureDirection::Natural => -1.0,
-        SwipeGestureDirection::Reversed => 1.0,
-    };
-
     let scroll = &mut *strip;
+    // Direction: `[swipe.gesture] direction` vs `[swipe.scroll] direction` apply separately
+    // depending on whether input came from a touchpad swipe or scroll wheel.
+    let direction_modifier = match scroll.source {
+        ScrollSource::Gesture => match config.config().swipe_gesture_direction() {
+            SwipeGestureDirection::Natural => -1.0,
+            SwipeGestureDirection::Reversed => 1.0,
+        },
+        ScrollSource::Wheel => match config.config().swipe_scroll_direction() {
+            SwipeGestureDirection::Natural => -1.0,
+            SwipeGestureDirection::Reversed => 1.0,
+        },
+    };
     if scroll.velocity.abs() > 0.0001 {
         scroll.position += scroll.velocity * dt * viewport_width * direction_modifier;
     }

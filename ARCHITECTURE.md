@@ -52,6 +52,7 @@ Bevy is typically used for games, so Paneru implements a custom bridge to intera
 - **`Window`:** A wrapper around a macOS window handle (AXUIElement).
 - **`Display`:** Represents a physical monitor and its bounds.
 - **`LayoutStrip`:** A component attached to a Workspace/Display that manages the ordered list of `Column`s.
+- **`Scrolling`:** Active horizontal strip scroll state (velocity, position); `source` distinguishes touchpad gesture vs scroll wheel so `[swipe.gesture] direction` and `[swipe.scroll] direction` apply independently in `scrolling_integrator`.
 - **`LayoutPosition` / `Position`:** The intended (layout) vs. actual (on-screen) coordinates.
 - **`Bounds` / `WidthRatio`:** The size of the window and its relative width in the tiling strip.
 - **`FocusedMarker`:** Identifies the currently focused window.

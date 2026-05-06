@@ -3,7 +3,7 @@ use serde::Deserialize;
 use crate::errors::Error;
 use crate::platform::Modifiers;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 pub enum SwipeGestureDirection {
     Natural,
     Reversed,
@@ -48,6 +48,10 @@ pub struct ScrollOptions {
     /// switches virtual workspaces vertically instead of scrolling horizontally.
     #[serde(default, deserialize_with = "deserialize_modifier")]
     pub vertical_modifier: Option<Modifiers>,
+
+    /// Scroll wheel direction for moving the strip (`Natural` / `Reversed`).
+    /// Independent of `[swipe.gesture] direction`, which applies only to touchpad swipes.
+    pub direction: Option<SwipeGestureDirection>,
 }
 
 fn deserialize_modifier<'de, D>(deserializer: D) -> Result<Option<Modifiers>, D::Error>
